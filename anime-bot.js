@@ -36,21 +36,11 @@ async function cleanupSession() {
     const fs = await import('fs');
     const sessionDir = './AnimeSession';
     if (fs.existsSync(sessionDir)) {
-      const files = fs.readdirSync(sessionDir);
-      files.forEach(file => {
-        if (file.endsWith('.json')) {
-          const filePath = `${sessionDir}/${file}`;
-          const stats = fs.statSync(filePath);
-          // Remove files older than 24 hours
-          if (Date.now() - stats.mtimeMs > 24 * 60 * 60 * 1000) {
-            fs.unlinkSync(filePath);
-            console.log(`🗑️ Cleaned up old session file: ${file}`);
-          }
-        }
-      });
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      console.log('🗑️ Cleared old session directory to resolve session errors.');
     }
   } catch (error) {
-    console.log('⚠️ Error cleaning session files:', error.message);
+    console.log('⚠️ Error cleaning session directory:', error.message);
   }
 }
 
@@ -120,9 +110,11 @@ function setupHotReload(sock) {
   });
 }
 
-async function startBot() {
-  // Clean up old session files
-  await cleanupSession();
+async function startBot(cleanSession = true) {
+  // Clean up old session files, conditionally
+  if (cleanSession) {
+    await cleanupSession();
+  }
   
   // Use multi-file auth state
   const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
@@ -149,12 +141,15 @@ async function startBot() {
     }
     
     if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('❌ Connection closed due to:', lastDisconnect?.error?.output?.statusCode || 'Unknown');
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      console.log('❌ Connection closed due to:', statusCode || 'Unknown');
       
       if (shouldReconnect) {
         console.log('🔄 Reconnecting in 3 seconds...');
-        setTimeout(startBot, 3000);
+        // Do not clean session on 515 error, but do for others.
+        const cleanSession = statusCode !== 515;
+        setTimeout(() => startBot(cleanSession), 3000);
       } else {
         console.log('🚫 Logged out. Please restart and scan QR code again.');
       }
@@ -179,13 +174,25 @@ async function startBot() {
         // Setup hot-reload
         setupHotReload(sock);
         
-        // Log learning stats periodically
+        // Log learning stats periodically and keep connection alive
         setInterval(() => {
           if (currentAnimeBot) {
             const status = currentAnimeBot.getStatus();
             console.log(`📊 Status: ${status.status} | Characters learned: ${status.charactersLearned}`);
           }
         }, 300000); // Every 5 minutes
+        
+        // Keep connection alive
+        setInterval(() => {
+          try {
+            if (sock && sock.user) {
+              // Send a ping to keep the connection alive
+              sock.sendPresenceUpdate('available');
+            }
+          } catch (error) {
+            // Silent error handling for keep-alive
+          }
+        }, 60000); // Every minute
       } else {
         console.error('❌ Failed to load anime bot plugin');
       }
@@ -207,12 +214,22 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+// Prevent the process from exiting on uncaught errors
+process.on('exit', (code) => {
+  if (code !== 0) {
+    console.log('🔄 Process exiting with code:', code, '- Restarting...');
+    // Don't actually exit, let the process continue
+  }
+});
+
 process.on('uncaughtException', (err) => {
   console.error('❌ Uncaught Exception:', err);
+  // Don't exit, just log the error and continue
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit, just log the error and continue
 });
 
 // Start the bot

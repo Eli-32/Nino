@@ -28,24 +28,19 @@ class AnimeCharacterBot {
 
     async loadCharacterMappings() {
         try {
-            console.log(`📂 Loading character mappings from: ${this.characterMappingsPath}`);
             if (fs.existsSync(this.characterMappingsPath)) {
                 const data = fs.readFileSync(this.characterMappingsPath, 'utf8');
                 const mappings = JSON.parse(data);
                 if (mappings.arabicCharacterNames) {
                     this.arabicCharacterNames = new Map(Object.entries(mappings.arabicCharacterNames));
-                    console.log(`✅ Loaded ${this.arabicCharacterNames.size} character mappings`);
                 }
                 if (mappings.learnedCharacters) {
                     this.learnedCharacters = new Map(Object.entries(mappings.learnedCharacters));
-                    console.log(`✅ Loaded ${this.learnedCharacters.size} learned characters`);
                 }
             } else {
-                console.log(`⚠️ Character mappings file not found, creating a new one.`);
                 await this.saveCharacterMappings();
             }
         } catch (error) {
-            console.error(`❌ Error loading character mappings:`, error.message);
             this.arabicCharacterNames = new Map();
             this.learnedCharacters = new Map();
         }
@@ -59,9 +54,8 @@ class AnimeCharacterBot {
                 lastUpdated: new Date().toISOString()
             };
             fs.writeFileSync(this.characterMappingsPath, JSON.stringify(mappings, null, 2), 'utf8');
-            console.log(`💾 Saved character mappings to file`);
         } catch (error) {
-            console.error(`❌ Error saving character mappings:`, error.message);
+            // Silent error handling
         }
     }
 
@@ -74,10 +68,8 @@ class AnimeCharacterBot {
         // If it's a delay mistake, make it much longer
         if (isMistake && mistakeType === 'delay_mistake') {
             calculatedDelay *= 3; // 3x longer for delay mistakes
-            console.log(`⏰ Delay mistake: Extended delay to ${calculatedDelay}ms`);
         }
         
-        console.log(`⏱️ Adaptive delay: ${characterCount} character(s) = ${calculatedDelay}ms`);
         return calculatedDelay;
     }
 
@@ -113,7 +105,6 @@ class AnimeCharacterBot {
                 const typoChars = ['ا', 'و', 'ي', 'ه', 'ة', 'ء'];
                 const typoChar = typoChars[Math.floor(Math.random() * typoChars.length)];
                 characters[typoIndex] = char.slice(0, typoPos) + typoChar + char.slice(typoPos + 1);
-                console.log(`🤦 Typo mistake: "${originalCharacters[typoIndex]}" -> "${characters[typoIndex]}"`);
             }
         } else {
             // Other types of mistakes (less frequent)
@@ -126,18 +117,15 @@ class AnimeCharacterBot {
                     const keepCount = Math.max(1, Math.floor(characters.length * 0.7));
                     const shuffled = [...characters].sort(() => Math.random() - 0.5);
                     characters.splice(0, characters.length, ...shuffled.slice(0, keepCount));
-                    console.log(`🤦 Partial response mistake: ${originalCharacters.length} -> ${characters.length} characters`);
                     break;
                     
                 case 'reorder':
                     // Reorder the characters
                     characters.sort(() => Math.random() - 0.5);
-                    console.log(`🤦 Reorder mistake: Characters reordered`);
                     break;
                     
                 case 'delay_mistake':
                     // This will be handled in the delay calculation
-                    console.log(`🤦 Delay mistake: Will take longer than expected`);
                     break;
             }
         }
@@ -155,7 +143,6 @@ class AnimeCharacterBot {
         const timeSinceLastCall = now - this.lastAPICall;
         if (timeSinceLastCall < this.minAPIDelay) {
             const delay = this.minAPIDelay - timeSinceLastCall;
-            console.log(`⏳ Rate limiting: waiting ${delay}ms before API call`);
             await this.sleep(delay);
         }
         
@@ -188,12 +175,9 @@ class AnimeCharacterBot {
                 }
                 return null;
             } catch (error) {
-                console.log(`⚠️ API call attempt ${attempt} failed for ${apiUrl.split('/')[2]}: ${error.message}`);
-                
                 // Check if it's a rate limit error
                 if (error.response?.status === 429 || error.message.includes('rate limit') || error.message.includes('too many requests')) {
                     const backoffDelay = this.rateLimitBackoff * Math.pow(2, attempt - 1);
-                    console.log(`🚫 Rate limit hit, backing off for ${backoffDelay}ms`);
                     await this.sleep(backoffDelay);
                     continue; // Retry
                 }
@@ -203,7 +187,6 @@ class AnimeCharacterBot {
             }
         }
         
-        console.log(`❌ All API attempts failed for ${apiUrl.split('/')[2]}`);
         return null;
     }
 
@@ -220,7 +203,6 @@ class AnimeCharacterBot {
         if (!messageText.trim() || messageText === this.lastProcessedMessage) return null;
         const learnedCharacters = await this.extractPotentialCharacters(messageText);
         if (learnedCharacters.length === 0) return null;
-        console.log("📊 Extracted " + learnedCharacters.length + " characters:", learnedCharacters.map(c => c.input));
         this.lastProcessedMessage = messageText;
         this.tournamentMode = this.isTournamentMessage(messageText);
         return { learnedCharacters, tournamentMode: this.tournamentMode, originalText: messageText };
@@ -231,7 +213,6 @@ class AnimeCharacterBot {
     // Reset rate limiting after a period of no errors
     resetRateLimiting() {
         this.rateLimitBackoff = 1800; // Reset to initial backoff (10% faster)
-        console.log(`🔄 Rate limiting reset to normal`);
     }
 
     formatResponse(result) {
@@ -240,7 +221,6 @@ class AnimeCharacterBot {
         
         // Check if we should make a mistake (30% chance)
         if (this.shouldMakeMistake()) {
-            console.log(`🎲 30% chance triggered - Making a mistake!`);
             const mistakeResult = this.generateMistakeResponse(characterNames);
             return { 
                 text: mistakeResult.characters.join(' '), 
@@ -269,7 +249,7 @@ class AnimeCharacterBot {
         // Extract content and remove emojis
         const content = matches.map(m => m.slice(1, -1)).join(' ');
         
-        // Remove emojis and other symbols, keep only Arabic text, English letters, and spaces
+        // Remove emojis and other symbols, but preserve separators
         const cleanContent = content
             .replace(/[\u{1F600}-\u{1F64F}]/gu, '') // Emoticons
             .replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // Miscellaneous Symbols and Pictographs
@@ -277,14 +257,9 @@ class AnimeCharacterBot {
             .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '') // Regional Indicator Symbols
             .replace(/[\u{2600}-\u{26FF}]/gu, '') // Miscellaneous Symbols
             .replace(/[\u{2700}-\u{27BF}]/gu, '') // Dingbats
-            .replace(/[^\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFFa-zA-Z\s]/g, '') // Keep only Arabic, English, and spaces
+            .replace(/[^\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFFa-zA-Z\s\/\-\|،,؛;:]/g, '') // Keep Arabic, English, spaces, and separators
             .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
             .trim();
-        
-        // Log if emojis were removed
-        if (content !== cleanContent) {
-            console.log(`🧹 Cleaned emojis: "${content}" -> "${cleanContent}"`);
-        }
         
         return cleanContent;
     }
@@ -292,7 +267,6 @@ class AnimeCharacterBot {
     async extractPotentialCharacters(text) {
         const content = this.extractContentBetweenAsterisks(text);
         if (!content.trim()) return [];
-        console.log(`⭐ Processing: "${content}"`);
         
         // Simply split by spaces and return all words as characters
         const separators = /[\s\/\-\|،,؛;:]+/g;
@@ -306,7 +280,7 @@ class AnimeCharacterBot {
             isCharacter: true
         }));
         
-        if (potentialCharacters.length > 0) this.saveCharacterMappings().catch(console.error);
+        if (potentialCharacters.length > 0) this.saveCharacterMappings().catch(() => {});
         return potentialCharacters;
     }
 
@@ -394,6 +368,7 @@ class WhatsAppAnimeBot {
         this.animeBot = new AnimeCharacterBot();
         this.isActive = false; // Bot starts as inactive by default
         this.selectedGroup = null; // Selected group to work in
+        this.activationTimestamp = 0; // Timestamp of bot activation
         this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014']; // Add owner phone numbers here
         this.messageHandler = null;
         this.processedMessages = new Set();
@@ -404,10 +379,7 @@ class WhatsAppAnimeBot {
     isOwner(senderNumber) {
         // Remove @s.whatsapp.net suffix if present
         const cleanNumber = senderNumber.replace('@s.whatsapp.net', '');
-        console.log(`🔍 Owner check: "${senderNumber}" -> "${cleanNumber}"`);
-        console.log(`🔍 Available owners: [${this.ownerNumbers.join(', ')}]`);
         const isOwner = this.ownerNumbers.includes(cleanNumber);
-        console.log(`🔍 Is owner: ${isOwner}`);
         return isOwner;
     }
 
@@ -429,8 +401,6 @@ class WhatsAppAnimeBot {
         if (this.messageHandler) this.sock.ev.off('messages.upsert', this.messageHandler);
         
         this.messageHandler = async (messageUpdate) => {
-            console.log(`📥 Received message update with ${messageUpdate.messages?.length || 0} messages`);
-            
             // Sort messages by timestamp (most recent first) to prioritize recent messages
             const sortedMessages = messageUpdate.messages.sort((a, b) => 
                 (b.messageTimestamp || 0) - (a.messageTimestamp || 0)
@@ -441,31 +411,24 @@ class WhatsAppAnimeBot {
                 const messageTimestamp = message.messageTimestamp || 0;
                 const currentTime = Date.now() / 1000; // Current time in seconds
                 
-                console.log(`📨 Processing message: "${msgContent}" from ${message.key.remoteJid} (timestamp: ${messageTimestamp})`);
-                console.log(`🔍 Message length: ${msgContent?.length}, Trimmed: "${msgContent?.trim()}"`);
-                
                 // Skip if message is from bot or has no content
                 if (message.key.fromMe || !msgContent) {
-                    console.log(`⏭️ Skipping message (fromMe: ${message.key.fromMe}, hasContent: ${!!msgContent})`);
                     continue;
                 }
                 
                 // Skip messages older than 30 seconds to avoid processing old messages
                 const messageAge = currentTime - messageTimestamp;
                 if (messageAge > 30) {
-                    console.log(`⏭️ Skipping old message (age: ${messageAge.toFixed(1)}s)`);
                     continue;
                 }
                 
                 // Skip if message is older than the last processed message
                 if (messageTimestamp < this.lastMessageTimestamp) {
-                    console.log(`⏭️ Skipping older message (timestamp: ${messageTimestamp} < last: ${this.lastMessageTimestamp})`);
                     continue;
                 }
                 
                 const messageId = `${message.key.remoteJid}-${message.key.id}-${messageTimestamp}`;
                 if (this.processedMessages.has(messageId)) {
-                    console.log(`⏭️ Skipping already processed message`);
                     continue;
                 }
                 
@@ -479,7 +442,6 @@ class WhatsAppAnimeBot {
                 const chatId = message.key.remoteJid;
                 
                 try {
-                    console.log(`🔍 Checking command: "${msgContent.trim()}"`);
                     
                     // Get sender number for owner check
                     const senderNumber = message.key.participant || message.key.remoteJid?.split('@')[0];
@@ -487,11 +449,8 @@ class WhatsAppAnimeBot {
                     // --- Owner-only Control Logic ---
                     if (msgContent.trim() === '.a' || msgContent.trim() === '.ابدا') {
                         if (!this.isOwner(senderNumber)) {
-                            console.log(`❌ Non-owner ${senderNumber} tried to activate bot - SILENT IGNORE`);
                             continue; // Silent ignore - no response
                         }
-                        
-                        console.log(`🎯 ACTIVATION COMMAND DETECTED by owner ${senderNumber}!`);
                         
                         // Show groups list for selection
                         const groups = await this.getGroupsList();
@@ -512,14 +471,11 @@ class WhatsAppAnimeBot {
                     
                     if (msgContent.trim() === '.x' || msgContent.trim() === '.وقف') {
                         if (!this.isOwner(senderNumber)) {
-                            console.log(`❌ Non-owner ${senderNumber} tried to deactivate bot - SILENT IGNORE`);
                             continue; // Silent ignore - no response
                         }
                         
                         this.isActive = false;
                         this.selectedGroup = null;
-                        console.log('🔴 Anime detector DEACTIVATED by owner.');
-                        console.log(`🔧 Bot status: ${this.isActive ? 'ACTIVE' : 'INACTIVE'}`);
                         await this.sock.sendMessage(chatId, { text: '🔴 Bot deactivated successfully!' });
                         continue;
                     }
@@ -532,9 +488,20 @@ class WhatsAppAnimeBot {
                         if (selectedIndex >= 0 && selectedIndex < groups.length) {
                             this.selectedGroup = groups[selectedIndex].id;
                             this.isActive = true;
-                            console.log(`✅ Bot activated in group: ${groups[selectedIndex].name}`);
-                            await this.sock.sendMessage(chatId, { 
-                                text: `✅ Bot activated in: **${groups[selectedIndex].name}**\n\nNow the bot will only respond in this group.` 
+                            this.activationTimestamp = Date.now() / 1000; // Set activation timestamp
+
+                            // Clear all messages in the selected group
+                            try {
+                                await this.sock.chatModify({ clear: 'all' }, this.selectedGroup);
+                                console.log(`🧹 Cleared chat in group: ${groups[selectedIndex].name}`);
+                            } catch (error) {
+                                console.error(`❌ Failed to clear chat in group ${groups[selectedIndex].name}:`, error);
+                                // (Optional) Send an error message to the owner
+                                await this.sock.sendMessage(chatId, { text: `⚠️ Failed to clear chat in ${groups[selectedIndex].name}.` });
+                            }
+
+                            await this.sock.sendMessage(chatId, {
+                                text: `✅ Bot activated in: **${groups[selectedIndex].name}**\n\nNow the bot will only respond in this group.`
                             });
                         } else {
                             await this.sock.sendMessage(chatId, { text: '❌ Invalid group number!' });
@@ -545,7 +512,7 @@ class WhatsAppAnimeBot {
                     // Status check command
                     if (msgContent.trim() === '.status' || msgContent.trim() === '.حالة') {
                         const status = this.getStatus();
-                        console.log(`🔧 Current status: ${status.status}`);
+
                         await this.sock.sendMessage(chatId, { text: `🤖 Bot Status: ${status.status}` });
                         continue;
                     }
@@ -555,11 +522,13 @@ class WhatsAppAnimeBot {
                     
                     // Check if message is from the selected group
                     if (this.selectedGroup && chatId !== this.selectedGroup) {
-                        console.log(`⏭️ Message from different group, ignoring`);
                         continue;
                     }
                     
-                    console.log(`📨 [${message.pushName || chatId.split('@')[0]}]: ${msgContent}`);
+                    // Skip messages older than the bot's activation time
+                    if (messageTimestamp < this.activationTimestamp) {
+                        continue;
+                    }
                     
                     const result = await this.animeBot.processMessage({ body: msgContent });
                     if (result?.learnedCharacters?.length > 0) {
@@ -576,30 +545,30 @@ class WhatsAppAnimeBot {
                             await this.sock.sendMessage(chatId, { text: responseData.text });
                             
                             if (responseData.isMistake) {
-                                console.log(`🤦 Sent mistake response: "${responseData.text}" (${responseData.mistakeType})`);
-                                
                                 // 50% chance to correct the mistake after a delay
                                 if (this.animeBot.shouldCorrectMistake()) {
-                                    console.log(`🔄 Will correct mistake in next message...`);
                                     setTimeout(async () => {
                                         try {
                                             const correctionText = this.animeBot.generateCorrectionMessage(
                                                 responseData.originalCharacters
                                             );
                                             await this.sock.sendMessage(chatId, { text: correctionText });
-                                            console.log(`✅ Sent correction: "${correctionText}"`);
                                         } catch (error) {
-                                            console.error('Error sending correction:', error);
+                                            // Silent error handling
                                         }
                                     }, 2000 + Math.random() * 1000); // 2-3 seconds delay
                                 }
-                            } else {
-                                console.log(`✅ Successfully sent: "${responseData.text}"`);
                             }
                         }
                     }
                 } catch (error) {
-                    console.error('Bot processing error:', error);
+                    // Silent error handling - don't let errors crash the bot
+                    try {
+                        // Try to log the error without crashing
+                        console.error('Bot processing error (silent):', error.message);
+                    } catch (logError) {
+                        // Even logging failed, just continue
+                    }
                 }
             }
         };
