@@ -30,20 +30,6 @@ app.listen(PORT, () => {
 
 console.log('🚀 Starting Anime Character Detector Bot...');
 
-// Clean session function
-async function cleanupSession() {
-  try {
-    const fs = await import('fs');
-    const sessionDir = './AnimeSession';
-    if (fs.existsSync(sessionDir)) {
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-      console.log('🗑️ Cleared old session directory to resolve session errors.');
-    }
-  } catch (error) {
-    console.log('⚠️ Error cleaning session directory:', error.message);
-  }
-}
-
 // Function to load the anime bot plugin
 async function loadAnimeBot() {
   try {
@@ -110,12 +96,7 @@ function setupHotReload(sock) {
   });
 }
 
-async function startBot(cleanSession = true) {
-  // Clean up old session files, conditionally
-  if (cleanSession) {
-    await cleanupSession();
-  }
-  
+async function startBot() {
   // Use multi-file auth state
   const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
   
@@ -147,9 +128,7 @@ async function startBot(cleanSession = true) {
       
       if (shouldReconnect) {
         console.log('🔄 Reconnecting in 3 seconds...');
-        // Do not clean session on 515 error, but do for others.
-        const cleanSession = statusCode !== 515;
-        setTimeout(() => startBot(cleanSession), 3000);
+        setTimeout(startBot, 3000);
       } else {
         console.log('🚫 Logged out. Please restart and scan QR code again.');
       }
