@@ -16,6 +16,13 @@ class AnimeCharacterBot {
         this.learnedCharacters = new Map();
         this.arabicCharacterNames = new Map();
         this.characterMappingsPath = path.join(process.cwd(), 'plugins', 'character-mappings.json');
+        
+        // Rate limiting protection
+        this.lastAPICall = 0;
+        this.minAPIDelay = 900; // Reduced from 1000 to 900 (10% faster)
+        this.rateLimitRetries = 3;
+        this.rateLimitBackoff = 1800; // Reduced from 2000 to 1800 (10% faster)
+        
         this.loadCharacterMappings();
     }
 
@@ -59,9 +66,9 @@ class AnimeCharacterBot {
     }
 
     getAdaptiveDelay(characterCount = 1, isMistake = false, mistakeType = null) {
-        const baseDelay = 800; // Base delay for 1 character
-        const perCharacterDelay = 800; // Each additional character adds this much time
-        const randomVariation = Math.floor(Math.random() * 500); // Random variation
+        const baseDelay = 648; // Reduced from 720 to 648 (10% faster)
+        const perCharacterDelay = 648; // Reduced from 720 to 648 (10% faster)
+        const randomVariation = Math.floor(Math.random() * 405); // Reduced from 450 to 405 (10% faster)
         let calculatedDelay = baseDelay + ((characterCount - 1) * perCharacterDelay) + randomVariation;
         
         // If it's a delay mistake, make it much longer
@@ -143,25 +150,60 @@ class AnimeCharacterBot {
     }
 
     async searchSingleAPI(apiUrl, characterName) {
-        try {
-            let searchUrl = '';
-            if (apiUrl.includes('jikan.moe')) searchUrl = `${apiUrl}?q=${encodeURIComponent(characterName)}&limit=1`;
-            else if (apiUrl.includes('kitsu.io')) searchUrl = `${apiUrl}?filter[name]=${encodeURIComponent(characterName)}&page[limit]=1`;
-            else if (apiUrl.includes('anilist.co')) {
-                const query = "query ($search: String) { Character(search: $search) { name { full native } id } }";
-                const response = await axios.post(apiUrl, { query, variables: { search: characterName } }, { timeout: 660 });
-                if (response.data?.data?.Character) {
-                    const char = response.data.data.Character;
-                    return { name: char.name.full || char.name.native, confidence: 0.9, source: 'AniList' };
+        // Rate limiting: ensure minimum delay between API calls
+        const now = Date.now();
+        const timeSinceLastCall = now - this.lastAPICall;
+        if (timeSinceLastCall < this.minAPIDelay) {
+            const delay = this.minAPIDelay - timeSinceLastCall;
+            console.log(`⏳ Rate limiting: waiting ${delay}ms before API call`);
+            await this.sleep(delay);
+        }
+        
+        for (let attempt = 1; attempt <= this.rateLimitRetries; attempt++) {
+            try {
+                let searchUrl = '';
+                if (apiUrl.includes('jikan.moe')) searchUrl = `${apiUrl}?q=${encodeURIComponent(characterName)}&limit=1`;
+                else if (apiUrl.includes('kitsu.io')) searchUrl = `${apiUrl}?filter[name]=${encodeURIComponent(characterName)}&page[limit]=1`;
+                else if (apiUrl.includes('anilist.co')) {
+                    const query = "query ($search: String) { Character(search: $search) { name { full native } id } }";
+                    const response = await axios.post(apiUrl, { query, variables: { search: characterName } }, { 
+                        timeout: 660,
+                        headers: { 'User-Agent': 'AnimeBot/1.0' }
+                    });
+                    if (response.data?.data?.Character) {
+                        const char = response.data.data.Character;
+                        this.lastAPICall = Date.now();
+                        return { name: char.name.full || char.name.native, confidence: 0.9, source: 'AniList' };
+                    }
+                    return null;
+                }
+                const response = await axios.get(searchUrl, { 
+                    timeout: 660, 
+                    headers: { 'User-Agent': 'AnimeBot/1.0' } 
+                });
+                if (response.data?.data?.[0]?.attributes) {
+                    const attrs = response.data.data[0].attributes;
+                    this.lastAPICall = Date.now();
+                    return { name: attrs.name || attrs.canonicalName, confidence: 0.8, source: apiUrl.split('/')[2] };
                 }
                 return null;
+            } catch (error) {
+                console.log(`⚠️ API call attempt ${attempt} failed for ${apiUrl.split('/')[2]}: ${error.message}`);
+                
+                // Check if it's a rate limit error
+                if (error.response?.status === 429 || error.message.includes('rate limit') || error.message.includes('too many requests')) {
+                    const backoffDelay = this.rateLimitBackoff * Math.pow(2, attempt - 1);
+                    console.log(`🚫 Rate limit hit, backing off for ${backoffDelay}ms`);
+                    await this.sleep(backoffDelay);
+                    continue; // Retry
+                }
+                
+                // For other errors, don't retry
+                break;
             }
-            const response = await axios.get(searchUrl, { timeout: 660, headers: { 'User-Agent': 'AnimeBot/1.0' } });
-            if (response.data?.data?.[0]?.attributes) {
-                const attrs = response.data.data[0].attributes;
-                return { name: attrs.name || attrs.canonicalName, confidence: 0.8, source: apiUrl.split('/')[2] };
-            }
-        } catch (error) { /* Ignore API failures */ }
+        }
+        
+        console.log(`❌ All API attempts failed for ${apiUrl.split('/')[2]}`);
         return null;
     }
 
@@ -185,6 +227,12 @@ class AnimeCharacterBot {
     }
 
     sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    // Reset rate limiting after a period of no errors
+    resetRateLimiting() {
+        this.rateLimitBackoff = 1800; // Reset to initial backoff (10% faster)
+        console.log(`🔄 Rate limiting reset to normal`);
+    }
 
     formatResponse(result) {
         if (!result || result.learnedCharacters.length === 0) return null;
@@ -349,6 +397,7 @@ class WhatsAppAnimeBot {
         this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014']; // Add owner phone numbers here
         this.messageHandler = null;
         this.processedMessages = new Set();
+        this.lastMessageTimestamp = 0; // Track the most recent message timestamp
         this.setupMessageHandler();
     }
 
@@ -381,19 +430,48 @@ class WhatsAppAnimeBot {
         
         this.messageHandler = async (messageUpdate) => {
             console.log(`📥 Received message update with ${messageUpdate.messages?.length || 0} messages`);
-            for (const message of messageUpdate.messages) {
+            
+            // Sort messages by timestamp (most recent first) to prioritize recent messages
+            const sortedMessages = messageUpdate.messages.sort((a, b) => 
+                (b.messageTimestamp || 0) - (a.messageTimestamp || 0)
+            );
+            
+            for (const message of sortedMessages) {
                 const msgContent = message.message?.conversation || message.message?.extendedTextMessage?.text;
-                console.log(`📨 Processing message: "${msgContent}" from ${message.key.remoteJid}`);
+                const messageTimestamp = message.messageTimestamp || 0;
+                const currentTime = Date.now() / 1000; // Current time in seconds
+                
+                console.log(`📨 Processing message: "${msgContent}" from ${message.key.remoteJid} (timestamp: ${messageTimestamp})`);
                 console.log(`🔍 Message length: ${msgContent?.length}, Trimmed: "${msgContent?.trim()}"`);
+                
+                // Skip if message is from bot or has no content
                 if (message.key.fromMe || !msgContent) {
                     console.log(`⏭️ Skipping message (fromMe: ${message.key.fromMe}, hasContent: ${!!msgContent})`);
                     continue;
                 }
                 
-                const messageId = `${message.key.remoteJid}-${message.key.id}-${message.messageTimestamp}`;
-                if (this.processedMessages.has(messageId)) continue;
+                // Skip messages older than 30 seconds to avoid processing old messages
+                const messageAge = currentTime - messageTimestamp;
+                if (messageAge > 30) {
+                    console.log(`⏭️ Skipping old message (age: ${messageAge.toFixed(1)}s)`);
+                    continue;
+                }
+                
+                // Skip if message is older than the last processed message
+                if (messageTimestamp < this.lastMessageTimestamp) {
+                    console.log(`⏭️ Skipping older message (timestamp: ${messageTimestamp} < last: ${this.lastMessageTimestamp})`);
+                    continue;
+                }
+                
+                const messageId = `${message.key.remoteJid}-${message.key.id}-${messageTimestamp}`;
+                if (this.processedMessages.has(messageId)) {
+                    console.log(`⏭️ Skipping already processed message`);
+                    continue;
+                }
                 
                 this.processedMessages.add(messageId);
+                this.lastMessageTimestamp = Math.max(this.lastMessageTimestamp, messageTimestamp);
+                
                 if (this.processedMessages.size > 200) {
                     this.processedMessages.delete(this.processedMessages.values().next().value);
                 }
