@@ -121,10 +121,9 @@ async function startBot() {
     
     // Add getMessage for retries
     getMessage: async (key) => {
-      // Implement your own logic to fetch messages from a store
-      return {
-        conversation: 'hello'
-      };
+      // A proper implementation should fetch the message from a store
+      // For now, returning undefined is better than a placeholder to avoid crashes
+      return undefined;
     }
   });
 
