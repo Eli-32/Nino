@@ -30,6 +30,11 @@ app.listen(PORT, () => {
 
 console.log('🚀 Starting Anime Character Detector Bot...');
 
+// This function is intentionally left empty to prevent session clearing.
+async function cleanupSession() {
+  // DO NOT ADD ANY CODE HERE.
+}
+
 // Function to load the anime bot plugin
 async function loadAnimeBot() {
   try {
@@ -97,6 +102,7 @@ function setupHotReload(sock) {
 }
 
 async function startBot() {
+  console.log('✅ Starting bot without cleaning session. Version: 2');
   // Use multi-file auth state
   const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
   
