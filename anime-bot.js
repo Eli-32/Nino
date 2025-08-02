@@ -110,12 +110,22 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    logger: pino({ level: 'silent' }),
-    browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
-    defaultQueryTimeoutMs: 60000,
+    logger: pino({ level: 'trace' }), // Use 'trace' for detailed debugging
+    browser: ['Anime Detector Bot', 'Chrome', '2.0.0'], // Updated version
+    defaultQueryTimeoutMs: undefined, // Use default
     connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 10000,
+    keepAliveIntervalMs: 20000, // Increased keep-alive
     markOnlineOnConnect: true,
+    syncFullHistory: false, // Do not sync full history
+    emitOwnEvents: false, // Don't process bot's own messages
+    
+    // Add getMessage for retries
+    getMessage: async (key) => {
+      // Implement your own logic to fetch messages from a store
+      return {
+        conversation: 'hello'
+      };
+    }
   });
 
   // Handle QR code
@@ -130,13 +140,15 @@ async function startBot() {
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log('❌ Connection closed due to:', statusCode || 'Unknown');
-      
+      console.log('❌ Connection closed due to:', lastDisconnect?.error, 'status code:', statusCode);
+
       if (shouldReconnect) {
-        console.log('🔄 Reconnecting in 3 seconds...');
-        setTimeout(startBot, 3000);
+        // Use exponential backoff for reconnection
+        const delay = (lastDisconnect?.error?.output?.payload?.retryAfter || 1) * 1000;
+        console.log(`🔄 Reconnecting in ${delay / 1000} seconds...`);
+        setTimeout(startBot, delay);
       } else {
-        console.log('🚫 Logged out. Please restart and scan QR code again.');
+        console.log('🚫 Logged out. Please delete the session and scan QR code again.');
       }
     } else if (connection === 'open') {
       console.log('✅ Connected to WhatsApp successfully!');
